@@ -491,7 +491,11 @@ input.money{font-family:var(--num);text-align:right}
 <script>
 'use strict';
 
-const $ = id => document.getElementById(id);
+/* Elementos opcionais (ex.: tela de login, desligada): se não existirem no HTML,
+   devolve um objeto inerte em vez de quebrar o script inteiro. */
+const NOOP = () => {};
+const INERTE = new Proxy({}, { get: (t, k) => (k === 'addEventListener' ? NOOP : k === 'hidden' || k === 'disabled' ? false : ''), set: () => true });
+const $ = id => document.getElementById(id) || INERTE;
 $('authYear').textContent = new Date().getFullYear();
 
 /* ---------------- login (Microsoft Entra ID) ---------------- */
