@@ -264,6 +264,18 @@ input.money{font-family:var(--num);text-align:right}
   .wm span{color:rgba(163,32,53,.2);border-color:rgba(163,32,53,.2)}
 }
 @media (prefers-reduced-motion:reduce){*{transition:none !important;animation:none !important}}
+
+/* ---------- autocomplete (Cadastro Mestre) ---------- */
+.f.ac{position:relative}
+.ac-list{position:absolute;left:0;right:0;top:100%;z-index:30;margin:2px 0 0;padding:0;list-style:none;background:var(--paper);border:1px solid var(--rule);box-shadow:0 6px 18px rgba(0,0,0,.14);max-height:280px;overflow-y:auto;font-family:var(--ui);font-size:13px}
+.ac-list li{padding:7px 10px;cursor:pointer;display:flex;justify-content:space-between;gap:12px;border-bottom:1px solid var(--form-deep)}
+.ac-list li:last-child{border-bottom:0}
+.ac-list li.on,.ac-list li:hover{background:var(--form)}
+.ac-list li .cn{font-family:var(--num);font-size:11.5px;color:var(--ink-soft);white-space:nowrap}
+.ac-list li.msg{cursor:default;color:var(--ink-soft);font-style:italic}
+.ac-list li.msg:hover{background:var(--paper)}
+.ac-nota{font-family:var(--ui);font-size:12px;margin-top:3px;color:var(--ink-soft)}
+.ac-nota.warn{color:var(--stamp)}
 </style>
 </head>
 <body>
@@ -314,8 +326,8 @@ input.money{font-family:var(--num);text-align:right}
   <div class="step">
     <h2><b>02</b> Cliente</h2>
     <div class="grid2">
-      <label class="f" style="grid-column:1/-1"><span>Razão social</span><input type="text" id="c_razao" placeholder="Razão social completa"></label>
-      <label class="f"><span>CNPJ</span><input type="text" id="c_cnpj" placeholder="00.000.000/0000-00"></label>
+      <label class="f ac" style="grid-column:1/-1"><span>Razão social</span><input type="text" id="c_razao" placeholder="Digite para buscar no Cadastro Mestre" autocomplete="off" role="combobox" aria-autocomplete="list" aria-expanded="false"></label>
+      <label class="f ac"><span>CNPJ</span><input type="text" id="c_cnpj" placeholder="00.000.000/0000-00" autocomplete="off" role="combobox" aria-autocomplete="list" aria-expanded="false"></label>
       <label class="f"><span>CNAE principal</span><input type="text" id="c_cnae" placeholder="0000-0/00 — descrição"></label>
       <label class="f" style="grid-column:1/-1"><span>Regime de tributação</span>
         <select id="c_regime">
@@ -510,6 +522,10 @@ const msalApp = (typeof msal === 'undefined') ? null : new msal.PublicClientAppl
 
 const AUTH_SCOPES = ['User.Read'];
 
+/* Login Microsoft desligado temporariamente (fase de testes).
+   Para religar, troque para true — o resto do código de login continua intacto. */
+const AUTH_ATIVA = false;
+
 function mostraOverlay(mensagemErro){
   $('authOverlay').hidden = false;
   $('authUser').hidden = true;
@@ -561,6 +577,7 @@ $('btnLogin').addEventListener('click', fazerLogin);
 $('btnLogout').addEventListener('click', fazerLogout);
 
 (function initAuth(){
+  if (!AUTH_ATIVA){ $('authOverlay').hidden = true; return; }
   if (!msalApp){
     mostraOverlay('Não foi possível carregar a biblioteca de login da Microsoft. Verifique a conexão com a internet e recarregue a página.');
     $('btnLogin').disabled = true;
@@ -1221,6 +1238,82 @@ $('btnDemo').onclick=()=>{
   render();
   const rr=recon(); $('r_b').value=brl(rr.A - somaCol('receb') + num($('r_d').value)); render();
 };
+
+/* ---------------- autocomplete via Cadastro Mestre ---------------- */
+/* O navegador chama /api/cadastro (proxy na Vercel); o token do Cadastro Mestre fica só no servidor. */
+async function apiCadastro(params,signal){
+  const r=await fetch('/api/cadastro?'+new URLSearchParams(params),{signal});
+  const j=await r.json().catch(()=>({}));
+  if(!r.ok){ const e=new Error(j.erro||'Falha na consulta'); e.status=r.status; throw e; }
+  return j;
+}
+function notaCadastro(txt,warn){
+  let n=$('acNota');
+  if(!n){ n=document.createElement('div'); n.id='acNota'; n.setAttribute('role','status'); $('c_regime').closest('.grid2').appendChild(n); n.style.gridColumn='1/-1'; }
+  n.className='ac-nota'+(warn?' warn':''); n.textContent=txt||'';
+}
+async function preencheCliente(cnpj){
+  notaCadastro('Buscando dados no Cadastro Mestre…');
+  try{
+    const d=await apiCadastro({cnpj});
+    if(d.razaoSocial) $('c_razao').value=d.razaoSocial;
+    if(d.cnpjFormatado) $('c_cnpj').value=d.cnpjFormatado;
+    if(d.cnae) $('c_cnae').value=d.cnae;
+    if(d.regime) $('c_regime').value=d.regime;
+    render();
+    const av=[];
+    if(d.situacaoCadastral && d.situacaoCadastral!=='ATIVA') av.push('situação cadastral '+d.situacaoCadastral);
+    if(!d.regime) av.push('regime tributário não definido no cadastro — selecione manualmente');
+    if(!d.cnae) av.push('CNAE ausente');
+    notaCadastro('Dados preenchidos pelo Cadastro Mestre'+(av.length?' — atenção: '+av.join('; '):'')+'. Confira antes de emitir.',av.length>0);
+  }catch(e){
+    notaCadastro('Não foi possível carregar os dados: '+e.message,true);
+  }
+}
+function autocomplete(input){
+  const ul=document.createElement('ul'); ul.className='ac-list'; ul.hidden=true; ul.setAttribute('role','listbox');
+  input.parentNode.appendChild(ul);
+  let itens=[], idx=-1, timer, ctrl, seq=0;
+  const fechar=()=>{ ul.hidden=true; idx=-1; input.setAttribute('aria-expanded','false'); };
+  const msg=t=>{ ul.innerHTML=`<li class="msg">${esc(t)}</li>`; ul.hidden=false; input.setAttribute('aria-expanded','true'); };
+  function marca(i){
+    idx=i; [...ul.children].forEach((li,k)=>li.classList.toggle('on',k===i));
+    if(ul.children[i]) ul.children[i].scrollIntoView({block:'nearest'});
+  }
+  function escolhe(i){
+    const e=itens[i]; if(!e) return;
+    fechar(); input.value = input===$('c_cnpj') ? e.cnpjFormatado : e.razaoSocial;
+    preencheCliente(e.cnpj);
+  }
+  async function busca(){
+    const q=input.value.trim();
+    if(!q){ fechar(); return; }
+    if(ctrl) ctrl.abort(); ctrl=new AbortController(); const meu=++seq;
+    try{
+      const d=await apiCadastro({busca:q},ctrl.signal);
+      if(meu!==seq) return;
+      itens=d.resultados||[];
+      if(!itens.length){ msg('Nenhuma empresa encontrada no Cadastro Mestre'); return; }
+      ul.innerHTML=itens.map((e,i)=>`<li role="option" data-i="${i}"><span>${esc(e.razaoSocial)}</span><span class="cn">${esc(e.cnpjFormatado)}</span></li>`).join('')
+        + (d.total>itens.length?`<li class="msg">${d.total-itens.length} outras — continue digitando para refinar</li>`:'');
+      ul.hidden=false; input.setAttribute('aria-expanded','true'); idx=-1;
+    }catch(e){
+      if(e.name==='AbortError') return;
+      msg('Cadastro Mestre indisponível — preencha manualmente');
+    }
+  }
+  input.addEventListener('input',()=>{ clearTimeout(timer); timer=setTimeout(busca,200); });
+  input.addEventListener('keydown',e=>{
+    if(ul.hidden||!itens.length) return;
+    if(e.key==='ArrowDown'){ e.preventDefault(); marca(Math.min(idx+1,itens.length-1)); }
+    else if(e.key==='ArrowUp'){ e.preventDefault(); marca(Math.max(idx-1,0)); }
+    else if(e.key==='Enter'&&idx>=0){ e.preventDefault(); escolhe(idx); }
+    else if(e.key==='Escape') fechar();
+  });
+  ul.addEventListener('mousedown',e=>{ const li=e.target.closest('li[data-i]'); if(li){ e.preventDefault(); escolhe(+li.dataset.i); } });
+  input.addEventListener('blur',()=>setTimeout(fechar,120));
+}
+autocomplete($('c_razao')); autocomplete($('c_cnpj'));
 
 /* ---------------- início ---------------- */
 (function init(){
