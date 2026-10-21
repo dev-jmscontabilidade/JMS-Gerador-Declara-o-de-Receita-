@@ -452,8 +452,8 @@ input.money{font-family:var(--num);text-align:right}
       <label class="f"><span>Recibo da ECD</span><input type="text" id="e_ecd" placeholder="número"></label>
       <label class="f"><span>Data da transmissão</span><input type="date" id="e_ecddata"></label>
       <label class="f"><span>Data da declaração</span><input type="date" id="e_data"></label>
-      <label class="f" style="grid-column:1/-1"><span>Nome Do Representante legal do cliente e cargo</span><input type="text" id="e_rep" placeholder="Nome"></label>
-      <label class="f" style="grid-column:1/-1"><span>CPF Do Representante legal do cliente e cargo</span><input type="text" id="e_rep" placeholder="CPF"></label>
+      <label class="f" style="grid-column:1/-1"><span>Nome do representante legal</span><input type="text" id="e_rep_nome" placeholder="Nome"></label>
+      <label class="f" style="grid-column:1/-1"><span>CPF do representante legal</span><input type="text" id="e_rep_cpf" placeholder="CPF" inputmode="numeric" autocomplete="off"></label>
 
     </div>
   </div>
@@ -931,7 +931,7 @@ function renderPaper(){
   h+=`<p class="date">${ph($('e_cidade').value)}, ${$('e_data').value?dtLongo($('e_data').value):'<span style="color:#A32035">[data]</span>'}.</p>`;
   h+=`<div class="sig">
     <div></div><div class="sigblock"><b>${ph($('e_nome').value)}</b><br>Contador — ${ph($('e_crc').value)}<br>${ph($('e_escr').value)}</div>
-    <div></div><div class="sigblock"><b>${ph($('e_rep').value)}</b><br>Representante legal — ${ph($('c_razao').value)}</div></div>`;
+    <div></div><div class="sigblock"><b>${ph($('e_rep_nome').value)}</b><br>Representante legal — ${ph($('c_razao').value)}<br>CPF: ${ph($('e_rep_cpf').value)}</div></div>`;
 
   const pend=flags();
   const wm = (pend.length || !allChecked()) ? '<div class="wm"><span>Minuta<br>conferência pendente</span></div>' : '';
@@ -1239,7 +1239,7 @@ $('btnDemo').onclick=()=>{
   $('e_nome').value='[contador responsável]'; $('e_crc').value='CRC/MG 000000/O-0';
   $('e_unidade').value='jf'; aplicaUnidade();
   const hoje=new Date().toISOString().slice(0,10); $('e_data').value=hoje; $('e_ecddata').value='2026-05-28';
-  $('e_rep').value='[representante legal] — sócio-administrador — CPF 000.000.000-00';
+  $('e_rep_nome').value='[representante legal] — sócio-administrador'; $('e_rep_cpf').value='';
   render();
   const rr=recon(); $('r_b').value=brl(rr.A - somaCol('receb') + num($('r_d').value)); render();
 };
@@ -1265,11 +1265,19 @@ async function preencheCliente(cnpj){
     if(d.cnpjFormatado) $('c_cnpj').value=d.cnpjFormatado;
     if(d.cnae) $('c_cnae').value=d.cnae;
     if(d.regime) $('c_regime').value=d.regime;
+    if(d.responsavelLegal){
+      $('e_rep_nome').value = [d.responsavelLegal.nome, d.responsavelLegal.qualificacao].filter(Boolean).join(' — ');
+      $('e_rep_cpf').value = d.responsavelLegal.cpf || '';
+    } else {
+      $('e_rep_nome').value = '';
+      $('e_rep_cpf').value = '';
+    }
     render();
     const av=[];
     if(d.situacaoCadastral && d.situacaoCadastral!=='ATIVA') av.push('situação cadastral '+d.situacaoCadastral);
     if(!d.regime) av.push('regime tributário não definido no cadastro — selecione manualmente');
     if(!d.cnae) av.push('CNAE ausente');
+    if(!d.responsavelLegal) av.push(d.erroSocietario || 'responsável legal não cadastrado');
     notaCadastro('Dados preenchidos pelo Cadastro Mestre'+(av.length?' — atenção: '+av.join('; '):'')+'. Confira antes de emitir.',av.length>0);
   }catch(e){
     notaCadastro('Não foi possível carregar os dados: '+e.message,true);

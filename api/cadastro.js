@@ -35,10 +35,20 @@ module.exports = async (req, res) => {
       const { status, corpo } = await cm('/empresas/' + encodeURIComponent(id));
       if (status !== 200) return res.status(status).json({ erro: corpo.erro || 'erro no Cadastro Mestre' });
       const reg = corpo.regimeTributario?.vigente?.regime;
+      // Dados societários são pessoais e exigem token com escopo_societario.
+      const societario = await cm('/empresas/' + encodeURIComponent(id) + '/societario');
+      const responsavel = societario.status === 200 ? societario.corpo.responsavelLegal : null;
       return res.json({
         razaoSocial: corpo.razaoSocial || '', cnpjFormatado: corpo.cnpjFormatado || '',
         cnae: cnaeFmt(corpo.cnaePrincipal), regime: REGIME[reg] || '',
         situacaoCadastral: corpo.situacaoCadastral || null,
+        responsavelLegal: responsavel ? {
+          nome: responsavel.nome || '',
+          cpf: responsavel.documentoTipo === 'CPF' ? (responsavel.documentoFormatado || responsavel.documento || '') : '',
+          qualificacao: responsavel.qualificacao || ''
+        } : null,
+        erroSocietario: societario.status === 403 ? 'Token sem escopo societário' :
+          (societario.status === 200 ? null : (societario.corpo.erro || 'Responsável legal não disponível'))
       });
     }
     let q = String(busca || '').trim();
